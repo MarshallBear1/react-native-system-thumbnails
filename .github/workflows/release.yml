@@ -1,0 +1,91 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+  packages: write
+
+jobs:
+  checks:
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  publish:
+    needs: checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+
+      - name: Setup project
+        uses: ./.github/actions/setup
+
+      - name: Configure GitHub npm registry
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version-file: .nvmrc
+          registry-url: https://npm.pkg.github.com
+          scope: '@marshallbear1'
+
+      - name: Verify tag matches package version
+        run: >-
+          node -e "const version = require('./package.json').version;
+          if (process.env.GITHUB_REF_NAME !== 'v' + version) {
+          throw new Error('Tag ' + process.env.GITHUB_REF_NAME +
+          ' does not match package version ' + version); }"
+
+      - name: Verify package
+        run: yarn verify
+
+      - name: Install packed artifact in a clean consumer
+        id: pack
+        run: |
+          mkdir -p "$RUNNER_TEMP/prepublish-pack"
+          npm pack --pack-destination "$RUNNER_TEMP/prepublish-pack"
+          package_archive=$(find "$RUNNER_TEMP/prepublish-pack" -maxdepth 1 -type f -name '*.tgz' -print -quit)
+          test -n "$package_archive"
+          echo "archive=$package_archive" >> "$GITHUB_OUTPUT"
+          mkdir -p "$RUNNER_TEMP/prepublish-consumer"
+          cd "$RUNNER_TEMP/prepublish-consumer"
+          npm init --yes
+          npm install "$package_archive" --ignore-scripts --legacy-peer-deps
+          node -e "const fs = require('node:fs'); const root = 'node_modules/@marshallbear1/react-native-system-thumbnails'; const pkg = require('./' + root + '/package.json'); const required = ['ReactNativeSystemThumbnails.podspec', 'ios/ReactNativeSystemThumbnails.h', 'ios/ReactNativeSystemThumbnails.mm', 'android/src/main/AndroidManifest.xml', 'android/src/main/java/com/marshallbear1/reactnativesystemthumbnails/ReactNativeSystemThumbnailsModule.kt', 'src/NativeReactNativeSystemThumbnails.ts', 'lib/module/index.js', 'lib/typescript/src/index.d.ts']; if (pkg.version !== process.env.GITHUB_REF_NAME.slice(1) || required.some(file => !fs.existsSync(root + '/' + file))) process.exit(1);"
+
+      - name: Publish to GitHub Packages
+        run: npm publish "${{ steps.pack.outputs.archive }}" --registry=https://npm.pkg.github.com
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Verify registry metadata
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if npm view "@marshallbear1/react-native-system-thumbnails@${GITHUB_REF_NAME#v}" version --registry=https://npm.pkg.github.com; then
+              exit 0
+            fi
+            echo "Registry metadata is not ready (attempt $attempt of 6)."
+            sleep 5
+          done
+          exit 1
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install published package in a clean consumer
+        run: |
+          mkdir -p /tmp/system-thumbnails-consumer
+          cd /tmp/system-thumbnails-consumer
+          npm init --yes
+          npm install "@marshallbear1/react-native-system-thumbnails@${GITHUB_REF_NAME#v}" --ignore-scripts --legacy-peer-deps --registry=https://npm.pkg.github.com
+          node -e "const fs = require('node:fs'); const root = 'node_modules/@marshallbear1/react-native-system-thumbnails'; const pkg = require('./' + root + '/package.json'); const required = ['ReactNativeSystemThumbnails.podspec', 'ios/ReactNativeSystemThumbnails.h', 'ios/ReactNativeSystemThumbnails.mm', 'android/src/main/AndroidManifest.xml', 'android/src/main/java/com/marshallbear1/reactnativesystemthumbnails/ReactNativeSystemThumbnailsModule.kt', 'src/NativeReactNativeSystemThumbnails.ts', 'lib/module/index.js', 'lib/typescript/src/index.d.ts']; if (pkg.version !== process.env.GITHUB_REF_NAME.slice(1) || required.some(file => !fs.existsSync(root + '/' + file))) process.exit(1);"
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Create GitHub release
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes --verify-tag
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

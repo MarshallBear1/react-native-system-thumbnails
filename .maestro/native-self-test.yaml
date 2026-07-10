@@ -1,0 +1,20 @@
+appId: marshallbear1.reactnativesystemthumbnails.example
+name: Native thumbnail self-test
+---
+- launchApp:
+    clearState: true
+- assertVisible:
+    id: 'screen-title'
+- scrollUntilVisible:
+    element:
+      id: 'run-self-test'
+    direction: DOWN
+- assertVisible:
+    id: 'self-test-idle'
+- tapOn:
+    id: 'run-self-test'
+- extendedWaitUntil:
+    visible:
+      id: 'self-test-pass'
+    timeout: 30000
+- assertVisible: 'PASS'

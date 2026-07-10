@@ -1,0 +1,147 @@
+{
+  "name": "@marshallbear1/react-native-system-thumbnails",
+  "version": "0.1.0",
+  "description": "Generate native system thumbnails and file icons for local React Native content.",
+  "type": "commonjs",
+  "main": "./lib/module/index.js",
+  "types": "./lib/typescript/src/index.d.ts",
+  "exports": {
+    ".": {
+      "marshallbear1-react-native-system-thumbnails-source": "./src/index.ts",
+      "types": "./lib/typescript/src/index.d.ts",
+      "default": "./lib/module/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "CHANGELOG.md",
+    "src",
+    "lib",
+    "android",
+    "ios",
+    "cpp",
+    "*.podspec",
+    "react-native.config.js",
+    "!ios/build",
+    "!android/build",
+    "!android/gradle",
+    "!android/gradlew",
+    "!android/gradlew.bat",
+    "!android/local.properties",
+    "!android/src/test",
+    "!ios/Tests",
+    "!**/__tests__",
+    "!**/__fixtures__",
+    "!**/__mocks__",
+    "!**/.*"
+  ],
+  "scripts": {
+    "example": "yarn workspace @marshallbear1/react-native-system-thumbnails-example",
+    "build": "bob build",
+    "clean": "del-cli android/build example/android/build example/android/app/build example/ios/build lib",
+    "prepare": "bob build",
+    "typecheck": "tsc",
+    "lint": "eslint \"**/*.{js,ts,tsx}\"",
+    "test": "jest --runInBand",
+    "test:watch": "jest --watch",
+    "pack:check": "publint",
+    "verify": "yarn lint && yarn typecheck && yarn test && yarn build && yarn pack:check"
+  },
+  "keywords": [
+    "react-native",
+    "thumbnail",
+    "quicklook",
+    "content-uri",
+    "pdf",
+    "video",
+    "ios",
+    "android"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/MarshallBear1/react-native-system-thumbnails.git"
+  },
+  "author": "MarshallBear1 <126336809+MarshallBear1@users.noreply.github.com> (https://github.com/MarshallBear1)",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/MarshallBear1/react-native-system-thumbnails/issues"
+  },
+  "homepage": "https://github.com/MarshallBear1/react-native-system-thumbnails#readme",
+  "publishConfig": {
+    "registry": "https://npm.pkg.github.com",
+    "access": "public"
+  },
+  "sideEffects": false,
+  "devDependencies": {
+    "@babel/core": "^7.29.0",
+    "@eslint/compat": "^2.1.0",
+    "@eslint/eslintrc": "^3.3.5",
+    "@eslint/js": "^8.57.1",
+    "@react-native/babel-preset": "0.86.0",
+    "@react-native/eslint-config": "0.86.0",
+    "@types/jest": "^30.0.0",
+    "@types/react": "^19.2.0",
+    "babel-jest": "^30.4.1",
+    "del-cli": "^7.0.0",
+    "eslint": "^8.57.1",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "jest": "^30.4.2",
+    "prettier": "^3.8.3",
+    "publint": "^0.3.21",
+    "react": "19.2.3",
+    "react-native": "0.86.0",
+    "react-native-builder-bob": "^0.43.0",
+    "turbo": "^2.9.16",
+    "typescript": "^6.0.3"
+  },
+  "peerDependencies": {
+    "react": "^19.2.3",
+    "react-native": ">=0.86.0"
+  },
+  "workspaces": [
+    "example"
+  ],
+  "packageManager": "yarn@4.11.0",
+  "react-native-builder-bob": {
+    "source": "src",
+    "output": "lib",
+    "targets": [
+      [
+        "module",
+        {
+          "esm": true
+        }
+      ],
+      [
+        "typescript",
+        {
+          "project": "tsconfig.build.json"
+        }
+      ]
+    ]
+  },
+  "codegenConfig": {
+    "name": "ReactNativeSystemThumbnailsSpec",
+    "type": "modules",
+    "jsSrcsDir": "src",
+    "android": {
+      "javaPackageName": "com.marshallbear1.reactnativesystemthumbnails"
+    }
+  },
+  "prettier": {
+    "quoteProps": "consistent",
+    "singleQuote": true,
+    "tabWidth": 2,
+    "trailingComma": "es5",
+    "useTabs": false
+  },
+  "create-react-native-library": {
+    "type": "turbo-module",
+    "languages": "kotlin-objc",
+    "tools": [
+      "eslint"
+    ],
+    "version": "0.63.0"
+  }
+}

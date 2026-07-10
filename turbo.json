@@ -1,0 +1,54 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalDependencies": [".nvmrc", ".yarnrc.yml"],
+  "globalEnv": ["NODE_ENV"],
+  "tasks": {
+    "build:android": {
+      "env": [
+        "ANDROID_HOME",
+        "JAVA_VERSION",
+        "ORG_GRADLE_PROJECT_newArchEnabled"
+      ],
+      "inputs": [
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/android/**",
+        "!$TURBO_ROOT$/android/build/**",
+        "!$TURBO_ROOT$/android/generated/**",
+        "$TURBO_ROOT$/src/**/*.ts",
+        "$TURBO_ROOT$/src/**/*.tsx",
+        "package.json",
+        "android/**",
+        "!android/.gradle/**",
+        "!android/app/.cxx/**",
+        "!android/build/**",
+        "!android/app/build/**"
+      ],
+      "outputs": []
+    },
+    "build:ios": {
+      "env": [
+        "RCT_NEW_ARCH_ENABLED",
+        "RCT_REMOVE_LEGACY_ARCH",
+        "RCT_USE_RN_DEP",
+        "RCT_USE_PREBUILT_RNCORE",
+        "XCODE_VERSION"
+      ],
+      "inputs": [
+        "$TURBO_ROOT$/package.json",
+        "$TURBO_ROOT$/*.podspec",
+        "$TURBO_ROOT$/ios/**",
+        "!$TURBO_ROOT$/ios/build/**",
+        "!$TURBO_ROOT$/ios/generated/**",
+        "$TURBO_ROOT$/src/**/*.ts",
+        "$TURBO_ROOT$/src/**/*.tsx",
+        "package.json",
+        "Gemfile",
+        "Gemfile.lock",
+        "ios/**",
+        "!ios/build/**",
+        "!ios/Pods/**"
+      ],
+      "outputs": []
+    }
+  }
+}
