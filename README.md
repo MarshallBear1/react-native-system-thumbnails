@@ -16,6 +16,16 @@ The library uses Quick Look on iOS and native content, image, PDF, and media
 APIs on Android. It does not download remote files and does not move file bytes
 through JavaScript.
 
+## Native demo
+
+| iOS                                                                                                                | Android                                                                                                                    |
+| ------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------- |
+| ![iOS demo](https://raw.githubusercontent.com/MarshallBear1/react-native-system-thumbnails/main/docs/demo-ios.jpg) | ![Android demo](https://raw.githubusercontent.com/MarshallBear1/react-native-system-thumbnails/main/docs/demo-android.jpg) |
+
+The demo only shows `PASS` after the generated thumbnail renders, the cache
+hits, strict fallback rejects an icon-only file, icon fallback decodes, and the
+managed cache files are removed.
+
 ## Why this exists
 
 React Native has good libraries for video frames and separate libraries for
@@ -197,9 +207,10 @@ The test strategy deliberately goes beyond mocking JavaScript:
    icon fallback, cache reuse, and cancellation-sensitive paths.
 3. CocoaPods/Gradle and full example-app builds compile the actual iOS Quick
    Look and Android implementations against generated React Native 0.86 code.
-4. The example app runs the TurboModule on a bundled fixture, renders the
-   returned file, verifies a second call is a cache hit, and exposes a stable
-   `PASS` state.
+4. The example app runs the TurboModule on bundled fixtures, renders the
+   returned thumbnail, verifies a cache hit, proves strict fallback rejection,
+   decodes an icon fallback, clears the managed files, and only then exposes a
+   stable `PASS` state.
 5. A Maestro flow drives that self-test on iOS Simulator and Android Emulator.
 6. CI builds both native apps and checks the packed package, so autolinking,
    Codegen, CocoaPods, Gradle, and published-file omissions are caught.

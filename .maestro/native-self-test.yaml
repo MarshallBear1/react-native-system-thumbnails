@@ -18,3 +18,25 @@ name: Native thumbnail self-test
       id: 'self-test-pass'
     timeout: 30000
 - assertVisible: 'PASS'
+- scrollUntilVisible:
+    element:
+      id: 'result-image'
+    direction: UP
+- assertVisible:
+    id: 'result-image-state'
+- scrollUntilVisible:
+    element:
+      id: 'proof-cleanup-pass'
+    direction: DOWN
+- assertVisible:
+    id: 'proof-generated-pass'
+- assertVisible:
+    id: 'proof-rendered-pass'
+- assertVisible:
+    id: 'proof-cache-pass'
+- assertVisible:
+    id: 'proof-strict-pass'
+- assertVisible:
+    id: 'proof-icon-pass'
+- assertVisible:
+    id: 'proof-cleanup-pass'

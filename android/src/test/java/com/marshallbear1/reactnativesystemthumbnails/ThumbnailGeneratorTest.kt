@@ -86,6 +86,26 @@ class ThumbnailGeneratorTest {
   }
 
   @Test
+  fun `non previewable file fails when icon fallback is disabled`() {
+    val source = File(sourceDirectory, "strict.txt").apply {
+      writeText("RNST_UNKNOWN_FIXTURE_V1")
+    }
+
+    val error = try {
+      generator.generate(
+        request(uri = source.absolutePath, width = 80, height = 60)
+          .copy(allowIconFallback = false),
+        NativeCancellation()
+      )
+      throw AssertionError("Expected strict thumbnail generation to fail")
+    } catch (error: ThumbnailNativeException) {
+      error
+    }
+
+    assertEquals(ThumbnailErrorCode.GENERATION_FAILED, error.code)
+  }
+
+  @Test
   fun `pre-cancelled work fails with stable cancellation code`() {
     val cancellation = NativeCancellation().apply { cancel() }
     val source = File(sourceDirectory, "cancelled.txt").apply { writeText("cancel") }

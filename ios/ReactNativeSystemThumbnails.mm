@@ -446,6 +446,58 @@ static CGImageRef _Nullable RNSTCreateGenericIcon(
   return image;
 }
 
+static CGImageRef _Nullable RNSTCreateBoundedImage(
+    CGImageRef sourceImage,
+    NSInteger maximumWidth,
+    NSInteger maximumHeight) CF_RETURNS_RETAINED
+{
+  size_t sourceWidth = CGImageGetWidth(sourceImage);
+  size_t sourceHeight = CGImageGetHeight(sourceImage);
+  if (sourceWidth == 0 || sourceHeight == 0 || maximumWidth <= 0 || maximumHeight <= 0) {
+    return nil;
+  }
+
+  double scale = MIN((double)maximumWidth / (double)sourceWidth,
+                     (double)maximumHeight / (double)sourceHeight);
+  if (!isfinite(scale) || scale <= 0.0) {
+    return nil;
+  }
+
+  size_t targetWidth = MIN(
+      (size_t)maximumWidth,
+      MAX((size_t)1, (size_t)llround((double)sourceWidth * scale)));
+  size_t targetHeight = MIN(
+      (size_t)maximumHeight,
+      MAX((size_t)1, (size_t)llround((double)sourceHeight * scale)));
+  if (targetWidth > SIZE_MAX / 4) {
+    return nil;
+  }
+
+  CGColorSpaceRef colorSpace = CGColorSpaceCreateDeviceRGB();
+  CGContextRef context = CGBitmapContextCreate(
+      nil,
+      targetWidth,
+      targetHeight,
+      8,
+      targetWidth * 4,
+      colorSpace,
+      (CGBitmapInfo)kCGImageAlphaPremultipliedLast |
+          (CGBitmapInfo)kCGBitmapByteOrder32Big);
+  CGColorSpaceRelease(colorSpace);
+  if (context == nil) {
+    return nil;
+  }
+
+  CGContextSetInterpolationQuality(context, kCGInterpolationHigh);
+  CGContextDrawImage(
+      context,
+      CGRectMake(0, 0, (CGFloat)targetWidth, (CGFloat)targetHeight),
+      sourceImage);
+  CGImageRef boundedImage = CGBitmapContextCreateImage(context);
+  CGContextRelease(context);
+  return boundedImage;
+}
+
 static CGImageRef _Nullable RNSTCreateOpaqueImage(CGImageRef sourceImage) CF_RETURNS_RETAINED
 {
   size_t width = CGImageGetWidth(sourceImage);
@@ -741,7 +793,9 @@ static NSData *_Nullable RNSTEncodeImage(
   }
 
   if (useCache) {
-    for (NSString *kind in @[ @"thumbnail", @"icon" ]) {
+    NSArray<NSString *> *cachedKinds =
+        allowIconFallback ? @[ @"thumbnail", @"icon" ] : @[ @"thumbnail" ];
+    for (NSString *kind in cachedKinds) {
       NSURL *cachedURL = RNSTCacheFileURL(cacheDirectory, cacheKey, kind, format);
       if (![[NSFileManager defaultManager] fileExistsAtPath:cachedURL.path]) {
         continue;
@@ -749,7 +803,8 @@ static NSData *_Nullable RNSTEncodeImage(
 
       NSInteger cachedWidth = 0;
       NSInteger cachedHeight = 0;
-      if (RNSTReadImageSize(cachedURL, &cachedWidth, &cachedHeight)) {
+      if (RNSTReadImageSize(cachedURL, &cachedWidth, &cachedHeight) &&
+          cachedWidth <= width && cachedHeight <= height) {
         if ([self isOperationCancelled:operation]) {
           [self finishCancelledOperation:operation];
           return;
@@ -784,8 +839,10 @@ static NSData *_Nullable RNSTEncodeImage(
 
   QLThumbnailGenerationRequestRepresentationTypes representationTypes =
       QLThumbnailGenerationRequestRepresentationTypeThumbnail |
-      QLThumbnailGenerationRequestRepresentationTypeLowQualityThumbnail |
-      QLThumbnailGenerationRequestRepresentationTypeIcon;
+      QLThumbnailGenerationRequestRepresentationTypeLowQualityThumbnail;
+  if (allowIconFallback) {
+    representationTypes |= QLThumbnailGenerationRequestRepresentationTypeIcon;
+  }
   QLThumbnailGenerationRequest *request = [[QLThumbnailGenerationRequest alloc]
       initWithFileAtURL:sourceURL
                    size:CGSizeMake((CGFloat)width, (CGFloat)height)
@@ -817,6 +874,11 @@ static NSData *_Nullable RNSTEncodeImage(
       CGImageRef image = representation.CGImage;
       CGImageRef fallbackImage = nil;
       NSString *kind = nil;
+      if (image != nil &&
+          representation.type == QLThumbnailRepresentationTypeIcon &&
+          !allowIconFallback) {
+        image = nil;
+      }
       if (image != nil) {
         kind = representation.type == QLThumbnailRepresentationTypeIcon
             ? @"icon"
@@ -857,8 +919,30 @@ static NSData *_Nullable RNSTEncodeImage(
         return;
       }
 
+      CGImageRef boundedImage = nil;
+      if (pixelWidth > (size_t)width || pixelHeight > (size_t)height) {
+        boundedImage = RNSTCreateBoundedImage(image, width, height);
+        if (boundedImage == nil) {
+          if (fallbackImage != nil) {
+            CGImageRelease(fallbackImage);
+          }
+          [self finishOperation:operation
+                                result:nil
+                        rejectionCode:RNSTGenerationFailed
+                               message:@"Unable to resize the generated thumbnail."
+                       underlyingError:generationError];
+          return;
+        }
+        image = boundedImage;
+        pixelWidth = CGImageGetWidth(image);
+        pixelHeight = CGImageGetHeight(image);
+      }
+
       NSError *encodingError = nil;
       NSData *encodedImage = RNSTEncodeImage(image, format, quality, &encodingError);
+      if (boundedImage != nil) {
+        CGImageRelease(boundedImage);
+      }
       if (fallbackImage != nil) {
         CGImageRelease(fallbackImage);
       }

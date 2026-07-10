@@ -1,6 +1,6 @@
 {
   "name": "@marshallbear1/react-native-system-thumbnails",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Generate native system thumbnails and file icons for local React Native content.",
   "type": "commonjs",
   "main": "./lib/module/index.js",

@@ -33,9 +33,27 @@ const SOURCE_URI =
   Platform.OS === 'android'
     ? `content://${ANDROID_APPLICATION_ID}.fixtures/thumbnail-source.png`
     : 'bundle://thumbnail_source.png';
+const UNKNOWN_SOURCE_URI =
+  Platform.OS === 'android'
+    ? `content://${ANDROID_APPLICATION_ID}.fixtures/unknown-source.rnstunknown`
+    : 'bundle://unknown_source.rnstunknown';
 
 type ThumbnailResult = Awaited<ReturnType<typeof generateThumbnail>>;
 type TestPhase = 'idle' | 'running' | 'pass' | 'fail';
+type VerificationCheck =
+  'generated' | 'rendered' | 'cache' | 'strict' | 'icon' | 'cleanup';
+
+const PROOF_ITEMS: ReadonlyArray<{
+  id: VerificationCheck;
+  label: string;
+}> = [
+  { id: 'generated', label: 'Generated' },
+  { id: 'rendered', label: 'Rendered' },
+  { id: 'cache', label: 'Cache hit' },
+  { id: 'strict', label: 'Strict fallback' },
+  { id: 'icon', label: 'Icon fallback' },
+  { id: 'cleanup', label: 'Cache cleared' },
+];
 
 type ImageWaiter = {
   resolve: () => void;
@@ -49,12 +67,18 @@ function assert(condition: unknown, message: string): asserts condition {
   }
 }
 
-function validateThumbnail(result: ThumbnailResult) {
+function validateResult(
+  result: ThumbnailResult,
+  expectedKind: ThumbnailResult['kind']
+) {
   assert(
     result.uri.startsWith('file://'),
     'Result URI is not a local file URI'
   );
-  assert(result.kind === 'thumbnail', `Expected thumbnail, got ${result.kind}`);
+  assert(
+    result.kind === expectedKind,
+    `Expected ${expectedKind}, got ${result.kind}`
+  );
   assert(
     result.mimeType === 'image/png',
     `Unexpected MIME type ${result.mimeType}`
@@ -69,6 +93,47 @@ function validateThumbnail(result: ThumbnailResult) {
     result.height > 0 && result.height <= THUMBNAIL_SIZE.height,
     `Height ${result.height} is outside the requested bounds`
   );
+}
+
+function verifyImageCanLoad(uri: string) {
+  return new Promise<void>((resolve, reject) => {
+    let settled = false;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (error?: Error) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      if (timer) {
+        clearTimeout(timer);
+      }
+      if (error) {
+        reject(error);
+      } else {
+        resolve();
+      }
+    };
+
+    timer = setTimeout(
+      () =>
+        finish(
+          new Error('The generated icon did not decode within 10 seconds')
+        ),
+      10_000
+    );
+    Image.getSize(
+      uri,
+      (width, height) => {
+        if (width > 0 && height > 0) {
+          finish();
+        } else {
+          finish(new Error('The generated image has invalid dimensions'));
+        }
+      },
+      () =>
+        finish(new Error('React Native could not decode the generated icon'))
+    );
+  });
 }
 
 function describeError(error: unknown) {
@@ -91,6 +156,9 @@ export default function App() {
   const [thumbnail, setThumbnail] = useState<ThumbnailResult | null>(null);
   const [imageState, setImageState] = useState<'empty' | 'loading' | 'loaded'>(
     'empty'
+  );
+  const [completedChecks, setCompletedChecks] = useState<VerificationCheck[]>(
+    []
   );
   const imageWaiter = useRef<ImageWaiter | null>(null);
 
@@ -137,11 +205,18 @@ export default function App() {
     }
   }, []);
 
+  const markCheckComplete = useCallback((check: VerificationCheck) => {
+    setCompletedChecks((current) =>
+      current.includes(check) ? current : [...current, check]
+    );
+  }, []);
+
   const runSelfTest = useCallback(async () => {
     setPhase('running');
     setDetail('Clearing the cache for a cold start…');
     setThumbnail(null);
     setImageState('empty');
+    setCompletedChecks([]);
 
     try {
       await clearThumbnailCache();
@@ -157,18 +232,54 @@ export default function App() {
 
       setDetail('Generating and rendering a native thumbnail…');
       const first = await generateThumbnail(options);
-      validateThumbnail(first);
+      validateResult(first, 'thumbnail');
       assert(!first.fromCache, 'Cold generation unexpectedly came from cache');
+      markCheckComplete('generated');
       await waitForImage(first);
+      markCheckComplete('rendered');
 
       setDetail('Requesting the same thumbnail to verify the cache…');
       const cached = await generateThumbnail(options);
-      validateThumbnail(cached);
+      validateResult(cached, 'thumbnail');
       assert(cached.fromCache, 'Second generation was not served from cache');
       assert(
         cached.uri === first.uri,
         'Cache hit returned a different file URI'
       );
+      markCheckComplete('cache');
+
+      setDetail('Proving strict mode rejects an icon-only file…');
+      let strictFailure: unknown = null;
+      try {
+        await generateThumbnail({
+          ...options,
+          uri: UNKNOWN_SOURCE_URI,
+          cache: false,
+        });
+      } catch (error) {
+        strictFailure = error;
+      }
+      assert(
+        strictFailure instanceof ThumbnailError,
+        'Strict fallback did not reject with a ThumbnailError'
+      );
+      assert(
+        strictFailure.code === 'GENERATION_FAILED',
+        `Strict fallback rejected with ${strictFailure.code}`
+      );
+      markCheckComplete('strict');
+
+      setDetail('Generating and decoding the file-icon fallback…');
+      const icon = await generateThumbnail({
+        ...options,
+        uri: UNKNOWN_SOURCE_URI,
+        cache: false,
+        fallback: 'icon',
+      });
+      validateResult(icon, 'icon');
+      assert(!icon.fromCache, 'cache:false unexpectedly returned a cache hit');
+      await verifyImageCanLoad(icon.uri);
+      markCheckComplete('icon');
 
       setDetail('Clearing the generated cache entry…');
       const clearedEntries = await clearThumbnailCache();
@@ -176,16 +287,17 @@ export default function App() {
         Number.isInteger(clearedEntries) && clearedEntries >= 1,
         'Cache clear did not report the generated entry'
       );
+      markCheckComplete('cleanup');
 
       setPhase('pass');
       setDetail(
-        `Rendered ${first.width}×${first.height} PNG • cache hit • cleared ${clearedEntries}`
+        `${first.width}×${first.height} PNG and icon decoded • ${clearedEntries} files cleared`
       );
     } catch (error) {
       setPhase('fail');
       setDetail(describeError(error));
     }
-  }, [waitForImage]);
+  }, [markCheckComplete, waitForImage]);
 
   const clearPreview = useCallback(async () => {
     setPhase('running');
@@ -195,6 +307,7 @@ export default function App() {
       const clearedEntries = await clearThumbnailCache();
       setThumbnail(null);
       setImageState('empty');
+      setCompletedChecks([]);
       setPhase('idle');
       setDetail(`Cache cleared (${clearedEntries} entries removed).`);
     } catch (error) {
@@ -209,102 +322,201 @@ export default function App() {
     pass: 'PASS',
     fail: 'FAIL',
   }[phase];
+  const statusTitle = {
+    idle: 'Ready for a native run',
+    running: 'Checking the native pipeline',
+    pass: 'Every check passed',
+    fail: 'A native check failed',
+  }[phase];
+  const resultStateLabel = {
+    empty: 'WAITING',
+    loading: 'RENDERING',
+    loaded: 'NATIVE FILE',
+  }[imageState];
 
   return (
     <SafeAreaView style={styles.safeArea}>
       <StatusBar
-        barStyle="light-content"
+        barStyle="dark-content"
         backgroundColor={styles.safeArea.backgroundColor}
       />
       <ScrollView
         contentContainerStyle={styles.content}
         keyboardShouldPersistTaps="handled"
       >
-        <View style={styles.eyebrow}>
-          <View style={styles.liveDot} />
-          <Text style={styles.eyebrowText}>ON-DEVICE PROOF</Text>
+        <View style={styles.header}>
+          <View style={styles.brand}>
+            <View style={styles.brandMark}>
+              <Text style={styles.brandMarkText}>ST</Text>
+            </View>
+            <View>
+              <Text style={styles.brandName}>System Thumbnails</Text>
+              <Text style={styles.brandMeta}>React Native TurboModule</Text>
+            </View>
+          </View>
+          <View style={styles.platformPill}>
+            <View style={styles.platformDot} />
+            <Text style={styles.platformPillText}>
+              {Platform.OS.toUpperCase()} · NATIVE
+            </Text>
+          </View>
         </View>
 
         <Text style={styles.title} testID="screen-title">
-          System thumbnails,
-          {'\n'}verified natively.
+          Native previews,
+          {'\n'}one clean API.
         </Text>
         <Text style={styles.subtitle}>
-          Generate a local preview with the platform thumbnail APIs, then prove
-          rendering, caching, and cleanup in one tap.
+          Generate, render, cache, and clean up a local file without moving its
+          bytes through JavaScript.
         </Text>
 
-        <View style={styles.previewGrid}>
-          <View style={styles.previewCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardLabel}>SOURCE</Text>
-              <Text style={styles.cardMeta}>BUNDLED PNG</Text>
+        <View style={styles.showcaseCard}>
+          <View style={styles.fileHeader}>
+            <View style={styles.fileIcon}>
+              <Text style={styles.fileIconText}>PNG</Text>
             </View>
-            <View style={styles.imageFrame}>
-              <Image
-                accessibilityLabel="Bundled source image"
-                resizeMode="cover"
-                source={sourceAsset}
-                style={styles.previewImage}
-                testID="source-image"
-              />
+            <View style={styles.fileCopy}>
+              <Text style={styles.fileName}>thumbnail-source.png</Text>
+              <Text style={styles.fileMeta}>Bundled fixture · 192 × 192</Text>
+            </View>
+            <View style={styles.outputSpec}>
+              <Text style={styles.outputSpecValue}>128²</Text>
+              <Text style={styles.outputSpecLabel}>OUTPUT</Text>
             </View>
           </View>
 
-          <View style={styles.previewCard}>
-            <View style={styles.cardHeader}>
-              <Text style={styles.cardLabel}>RESULT</Text>
-              <Text style={styles.cardMeta} testID="result-image-state">
-                {imageState === 'loaded' ? 'NATIVE FILE' : 'AWAITING RUN'}
-              </Text>
-            </View>
-            <View style={[styles.imageFrame, styles.resultFrame]}>
-              {thumbnail ? (
+          <View style={styles.previewRow}>
+            <View style={styles.previewColumn}>
+              <View style={styles.previewLabelRow}>
+                <Text style={styles.previewLabel}>SOURCE</Text>
+                <Text style={styles.previewMeta}>ORIGINAL</Text>
+              </View>
+              <View style={styles.imageFrame}>
                 <Image
-                  accessibilityLabel="Generated native thumbnail"
-                  onError={() =>
-                    finishImageWait(
-                      new Error(
-                        'React Native Image could not load the result URI'
-                      )
-                    )
-                  }
-                  onLoad={() => finishImageWait()}
-                  resizeMode="contain"
-                  source={{ uri: thumbnail.uri }}
+                  accessibilityLabel="Bundled source image"
+                  resizeMode="cover"
+                  source={sourceAsset}
                   style={styles.previewImage}
-                  testID="result-image"
+                  testID="source-image"
                 />
+              </View>
+            </View>
+
+            <View style={styles.transformArrow}>
+              <Text style={styles.transformArrowText}>→</Text>
+            </View>
+
+            <View style={styles.previewColumn}>
+              <View style={styles.previewLabelRow}>
+                <Text style={styles.previewLabel}>THUMBNAIL</Text>
+                <Text style={styles.resultState} testID="result-image-state">
+                  {resultStateLabel}
+                </Text>
+              </View>
+              <View style={[styles.imageFrame, styles.resultFrame]}>
+                {thumbnail ? (
+                  <Image
+                    accessibilityLabel="Generated native thumbnail"
+                    onError={() =>
+                      finishImageWait(
+                        new Error(
+                          'React Native Image could not load the result URI'
+                        )
+                      )
+                    }
+                    onLoad={() => finishImageWait()}
+                    resizeMode="contain"
+                    source={{ uri: thumbnail.uri }}
+                    style={styles.previewImage}
+                    testID="result-image"
+                  />
+                ) : (
+                  <View style={styles.placeholder}>
+                    <Text style={styles.placeholderIcon}>◇</Text>
+                    <Text style={styles.placeholderText}>128 × 128</Text>
+                  </View>
+                )}
+              </View>
+            </View>
+          </View>
+
+          <View style={styles.divider} />
+
+          <View
+            accessibilityLiveRegion="polite"
+            style={[styles.statusSurface, styles[`statusSurface_${phase}`]]}
+            testID={`self-test-${phase}`}
+          >
+            <View style={[styles.statusIcon, styles[`statusIcon_${phase}`]]}>
+              {phase === 'running' ? (
+                <ActivityIndicator color="#1f8068" size="small" />
               ) : (
-                <View style={styles.placeholder}>
-                  <Text style={styles.placeholderIcon}>⌁</Text>
-                  <Text style={styles.placeholderText}>128 × 128</Text>
-                </View>
+                <Text
+                  style={[
+                    styles.statusIconText,
+                    styles[`statusIconText_${phase}`],
+                  ]}
+                >
+                  {phase === 'pass' ? '✓' : phase === 'fail' ? '!' : '•'}
+                </Text>
               )}
             </View>
-          </View>
-        </View>
-
-        <View
-          accessibilityLiveRegion="polite"
-          style={[styles.statusCard, styles[`statusCard_${phase}`]]}
-          testID={`self-test-${phase}`}
-        >
-          <View style={styles.statusTopLine}>
-            <Text style={[styles.statusLabel, styles[`statusLabel_${phase}`]]}>
-              {statusLabel}
-            </Text>
-            {phase === 'running' ? (
-              <ActivityIndicator color="#74e6c1" size="small" />
-            ) : (
-              <Text style={styles.platformLabel}>
-                {Platform.OS.toUpperCase()}
+            <View style={styles.statusCopy}>
+              <View style={styles.statusTopLine}>
+                <Text style={styles.statusTitle}>{statusTitle}</Text>
+                <Text
+                  style={[styles.statusLabel, styles[`statusLabel_${phase}`]]}
+                >
+                  {statusLabel}
+                </Text>
+              </View>
+              <Text style={styles.statusDetail} testID="self-test-detail">
+                {detail}
               </Text>
-            )}
+            </View>
           </View>
-          <Text style={styles.statusDetail} testID="self-test-detail">
-            {detail}
-          </Text>
+
+          <View style={styles.proofGrid}>
+            {PROOF_ITEMS.map((item) => {
+              const complete = completedChecks.includes(item.id);
+              return (
+                <View
+                  accessibilityLabel={`${item.label} ${complete ? 'passed' : 'pending'}`}
+                  key={item.id}
+                  style={[
+                    styles.proofItem,
+                    complete && styles.proofItemComplete,
+                  ]}
+                  testID={`proof-${item.id}-${complete ? 'pass' : 'pending'}`}
+                >
+                  <View
+                    style={[
+                      styles.proofDot,
+                      complete && styles.proofDotComplete,
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.proofDotText,
+                        complete && styles.proofDotTextComplete,
+                      ]}
+                    >
+                      {complete ? '✓' : '·'}
+                    </Text>
+                  </View>
+                  <Text
+                    style={[
+                      styles.proofLabel,
+                      complete && styles.proofLabelComplete,
+                    ]}
+                  >
+                    {item.label}
+                  </Text>
+                </View>
+              );
+            })}
+          </View>
         </View>
 
         <Pressable
@@ -322,7 +534,7 @@ export default function App() {
           <Text style={styles.primaryButtonText}>
             {phase === 'running'
               ? 'Running native checks…'
-              : 'Run native self-test'}
+              : 'Generate & verify'}
           </Text>
           <Text style={styles.buttonArrow}>→</Text>
         </Pressable>
@@ -335,17 +547,24 @@ export default function App() {
           style={({ pressed }) => [
             styles.secondaryButton,
             pressed && styles.buttonPressed,
+            phase === 'running' && styles.buttonDisabled,
           ]}
           testID="clear-thumbnail-cache"
         >
-          <Text style={styles.secondaryButtonText}>
-            Clear cache &amp; preview
-          </Text>
+          <Text style={styles.secondaryButtonText}>Reset demo</Text>
         </Pressable>
 
-        <Text numberOfLines={2} style={styles.uri} testID="source-uri">
-          {SOURCE_URI}
-        </Text>
+        <View style={styles.sourceDetail}>
+          <Text style={styles.sourceDetailLabel}>INPUT</Text>
+          <Text
+            ellipsizeMode="middle"
+            numberOfLines={1}
+            style={styles.uri}
+            testID="source-uri"
+          >
+            {SOURCE_URI}
+          </Text>
+        </View>
       </ScrollView>
     </SafeAreaView>
   );
@@ -354,94 +573,208 @@ export default function App() {
 const styles = StyleSheet.create({
   safeArea: {
     flex: 1,
-    backgroundColor: '#071019',
+    backgroundColor: '#f4f7f3',
   },
   content: {
+    alignSelf: 'center',
     flexGrow: 1,
-    paddingHorizontal: 22,
-    paddingTop: 32,
-    paddingBottom: 28,
+    maxWidth: 560,
+    paddingBottom: 24,
+    paddingHorizontal: 20,
+    paddingTop: 18,
+    width: '100%',
   },
-  eyebrow: {
+  header: {
     alignItems: 'center',
-    alignSelf: 'flex-start',
-    backgroundColor: '#10241f',
-    borderColor: '#255d4e',
-    borderRadius: 20,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+  },
+  brand: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 10,
+  },
+  brandMark: {
+    alignItems: 'center',
+    backgroundColor: '#173f35',
+    borderRadius: 10,
+    height: 36,
+    justifyContent: 'center',
+    width: 36,
+  },
+  brandMarkText: {
+    color: '#effff8',
+    fontSize: 11,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  brandName: {
+    color: '#17231f',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  brandMeta: {
+    color: '#7a867f',
+    fontSize: 10,
+    marginTop: 2,
+  },
+  platformPill: {
+    alignItems: 'center',
+    backgroundColor: '#e7f4ee',
+    borderColor: '#cfe5da',
+    borderRadius: 18,
     borderWidth: 1,
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: 11,
+    gap: 6,
+    paddingHorizontal: 10,
     paddingVertical: 7,
   },
-  liveDot: {
-    backgroundColor: '#74e6c1',
+  platformDot: {
+    backgroundColor: '#21866d',
     borderRadius: 4,
     height: 7,
     width: 7,
   },
-  eyebrowText: {
-    color: '#8ef0d0',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.3,
+  platformPillText: {
+    color: '#246b59',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.7,
   },
   title: {
-    color: '#f4f7f9',
-    fontSize: 36,
+    color: '#17231f',
+    fontSize: 34,
     fontWeight: '800',
-    letterSpacing: -1.4,
-    lineHeight: 41,
-    marginTop: 19,
+    letterSpacing: -1.2,
+    lineHeight: 38,
+    marginTop: 24,
   },
   subtitle: {
-    color: '#94a5b3',
+    color: '#69766f',
     fontSize: 15,
     lineHeight: 22,
-    marginTop: 13,
-    maxWidth: 530,
+    marginTop: 10,
+    maxWidth: 500,
   },
-  previewGrid: {
-    flexDirection: 'row',
-    gap: 12,
-    marginTop: 27,
-  },
-  previewCard: {
-    backgroundColor: '#0d1924',
-    borderColor: '#1b2c3b',
-    borderRadius: 18,
+  showcaseCard: {
+    backgroundColor: '#ffffff',
+    borderColor: '#dce4de',
+    borderRadius: 20,
     borderWidth: 1,
-    flex: 1,
-    padding: 10,
+    elevation: 2,
+    marginTop: 22,
+    padding: 16,
+    shadowColor: '#15231e',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.06,
+    shadowRadius: 18,
   },
-  cardHeader: {
+  fileHeader: {
     alignItems: 'center',
     flexDirection: 'row',
+  },
+  fileIcon: {
+    alignItems: 'center',
+    backgroundColor: '#e8f4ee',
+    borderRadius: 11,
+    height: 40,
+    justifyContent: 'center',
+    width: 40,
+  },
+  fileIconText: {
+    color: '#25765f',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.6,
+  },
+  fileCopy: {
+    flex: 1,
+    marginLeft: 11,
+  },
+  fileName: {
+    color: '#1c2925',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  fileMeta: {
+    color: '#859089',
+    fontSize: 11,
+    marginTop: 3,
+  },
+  outputSpec: {
+    alignItems: 'flex-end',
+  },
+  outputSpecValue: {
+    color: '#32413b',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  outputSpecLabel: {
+    color: '#99a29d',
+    fontSize: 8,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    marginTop: 2,
+  },
+  previewRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    marginTop: 18,
+  },
+  previewColumn: {
+    flex: 1,
+  },
+  previewLabelRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    height: 20,
     justifyContent: 'space-between',
-    paddingBottom: 9,
     paddingHorizontal: 2,
   },
-  cardLabel: {
-    color: '#eaf1f5',
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 1.1,
+  previewLabel: {
+    color: '#495851',
+    fontSize: 9,
+    fontWeight: '900',
+    letterSpacing: 0.8,
   },
-  cardMeta: {
-    color: '#627687',
+  previewMeta: {
+    color: '#a0aaa4',
     fontSize: 8,
-    fontWeight: '700',
+    fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  resultState: {
+    color: '#23775f',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+  },
+  transformArrow: {
+    alignItems: 'center',
+    backgroundColor: '#f0f4f1',
+    borderColor: '#e0e7e2',
+    borderRadius: 16,
+    borderWidth: 1,
+    height: 32,
+    justifyContent: 'center',
+    marginHorizontal: 10,
+    marginTop: 20,
+    width: 32,
+  },
+  transformArrowText: {
+    color: '#64726b',
+    fontSize: 17,
+    lineHeight: 19,
   },
   imageFrame: {
     aspectRatio: 1,
-    backgroundColor: '#172635',
-    borderRadius: 12,
+    backgroundColor: '#edf2ee',
+    borderRadius: 14,
     overflow: 'hidden',
   },
   resultFrame: {
-    backgroundColor: '#0a141e',
-    borderColor: '#243746',
+    backgroundColor: '#f7f9f7',
+    borderColor: '#cfd9d2',
     borderStyle: 'dashed',
     borderWidth: 1,
   },
@@ -455,95 +788,185 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   placeholderIcon: {
-    color: '#395064',
-    fontSize: 38,
-    lineHeight: 42,
+    color: '#aab5ae',
+    fontSize: 30,
+    lineHeight: 34,
   },
   placeholderText: {
-    color: '#52687a',
-    fontSize: 10,
+    color: '#9ba69f',
+    fontSize: 9,
     fontWeight: '700',
-    letterSpacing: 1,
-    marginTop: 3,
+    letterSpacing: 0.7,
+    marginTop: 2,
   },
-  statusCard: {
-    backgroundColor: '#0d1924',
-    borderColor: '#1b2c3b',
-    borderLeftWidth: 4,
+  divider: {
+    backgroundColor: '#e8ede9',
+    height: 1,
+    marginVertical: 16,
+  },
+  statusSurface: {
+    alignItems: 'flex-start',
+    backgroundColor: '#f6f8f6',
+    borderColor: '#e2e8e3',
     borderRadius: 14,
     borderWidth: 1,
-    marginTop: 15,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    flexDirection: 'row',
+    padding: 12,
   },
-  statusCard_idle: {
-    borderLeftColor: '#527086',
+  statusSurface_idle: {},
+  statusSurface_running: {
+    backgroundColor: '#f0f8f4',
+    borderColor: '#cfe7dc',
   },
-  statusCard_running: {
-    borderLeftColor: '#74e6c1',
+  statusSurface_pass: {
+    backgroundColor: '#edf8f3',
+    borderColor: '#bfe1d3',
   },
-  statusCard_pass: {
-    backgroundColor: '#0c211d',
-    borderColor: '#225c4c',
-    borderLeftColor: '#74e6c1',
+  statusSurface_fail: {
+    backgroundColor: '#fff1f1',
+    borderColor: '#f0caca',
   },
-  statusCard_fail: {
-    backgroundColor: '#271416',
-    borderColor: '#6b3037',
-    borderLeftColor: '#ff7d88',
+  statusIcon: {
+    alignItems: 'center',
+    backgroundColor: '#e7ebe8',
+    borderRadius: 14,
+    height: 28,
+    justifyContent: 'center',
+    width: 28,
+  },
+  statusIcon_idle: {},
+  statusIcon_running: {
+    backgroundColor: '#dff2e9',
+  },
+  statusIcon_pass: {
+    backgroundColor: '#21866d',
+  },
+  statusIcon_fail: {
+    backgroundColor: '#bd4e52',
+  },
+  statusIconText: {
+    fontSize: 14,
+    fontWeight: '900',
+  },
+  statusIconText_idle: {
+    color: '#738078',
+  },
+  statusIconText_running: {
+    color: '#21866d',
+  },
+  statusIconText_pass: {
+    color: '#ffffff',
+  },
+  statusIconText_fail: {
+    color: '#ffffff',
+  },
+  statusCopy: {
+    flex: 1,
+    marginLeft: 10,
   },
   statusTopLine: {
     alignItems: 'center',
     flexDirection: 'row',
     justifyContent: 'space-between',
   },
-  statusLabel: {
-    fontSize: 12,
-    fontWeight: '900',
-    letterSpacing: 1.5,
-  },
-  statusLabel_idle: {
-    color: '#91a8b9',
-  },
-  statusLabel_running: {
-    color: '#74e6c1',
-  },
-  statusLabel_pass: {
-    color: '#8ef0d0',
-  },
-  statusLabel_fail: {
-    color: '#ff98a1',
-  },
-  platformLabel: {
-    color: '#526779',
-    fontSize: 9,
+  statusTitle: {
+    color: '#22302b',
+    flex: 1,
+    fontSize: 13,
     fontWeight: '800',
+  },
+  statusLabel: {
+    fontSize: 9,
+    fontWeight: '900',
     letterSpacing: 1,
   },
+  statusLabel_idle: {
+    color: '#7f8a84',
+  },
+  statusLabel_running: {
+    color: '#21866d',
+  },
+  statusLabel_pass: {
+    color: '#176b56',
+  },
+  statusLabel_fail: {
+    color: '#ae3e43',
+  },
   statusDetail: {
-    color: '#b6c2cb',
-    fontSize: 13,
-    lineHeight: 19,
-    marginTop: 7,
+    color: '#69766f',
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
+  proofGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 12,
+  },
+  proofItem: {
+    alignItems: 'center',
+    backgroundColor: '#f7f9f7',
+    borderColor: '#e5eae6',
+    borderRadius: 10,
+    borderWidth: 1,
+    flexDirection: 'row',
+    minHeight: 34,
+    paddingHorizontal: 9,
+    width: '48.5%',
+  },
+  proofItemComplete: {
+    backgroundColor: '#f0f8f4',
+    borderColor: '#cfe7dc',
+  },
+  proofDot: {
+    alignItems: 'center',
+    backgroundColor: '#e6ebe7',
+    borderRadius: 9,
+    height: 18,
+    justifyContent: 'center',
+    width: 18,
+  },
+  proofDotComplete: {
+    backgroundColor: '#21866d',
+  },
+  proofDotText: {
+    color: '#89948e',
+    fontSize: 12,
+    fontWeight: '900',
+    lineHeight: 14,
+  },
+  proofDotTextComplete: {
+    color: '#ffffff',
+    fontSize: 10,
+  },
+  proofLabel: {
+    color: '#89948e',
+    fontSize: 10,
+    fontWeight: '700',
+    marginLeft: 7,
+  },
+  proofLabelComplete: {
+    color: '#315e50',
   },
   primaryButton: {
     alignItems: 'center',
-    backgroundColor: '#74e6c1',
+    backgroundColor: '#173f35',
     borderRadius: 14,
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginTop: 15,
+    marginTop: 16,
     minHeight: 54,
     paddingHorizontal: 18,
   },
   primaryButtonText: {
-    color: '#06251c',
+    color: '#f2fff9',
     fontSize: 15,
-    fontWeight: '900',
+    fontWeight: '800',
   },
   buttonArrow: {
-    color: '#06251c',
-    fontSize: 23,
+    color: '#b9ebd9',
+    fontSize: 21,
     fontWeight: '500',
   },
   buttonPressed: {
@@ -554,24 +977,36 @@ const styles = StyleSheet.create({
   },
   secondaryButton: {
     alignItems: 'center',
-    borderColor: '#243949',
-    borderRadius: 14,
-    borderWidth: 1,
     justifyContent: 'center',
-    marginTop: 9,
-    minHeight: 45,
+    marginTop: 5,
+    minHeight: 44,
   },
   secondaryButtonText: {
-    color: '#9db0be',
-    fontSize: 13,
+    color: '#66736c',
+    fontSize: 12,
     fontWeight: '700',
   },
+  sourceDetail: {
+    alignItems: 'center',
+    backgroundColor: '#e9eeea',
+    borderRadius: 10,
+    flexDirection: 'row',
+    marginTop: 2,
+    minHeight: 36,
+    paddingHorizontal: 10,
+  },
+  sourceDetailLabel: {
+    color: '#809087',
+    fontSize: 8,
+    fontWeight: '900',
+    letterSpacing: 0.8,
+  },
   uri: {
-    color: '#415665',
+    color: '#7a8780',
+    flex: 1,
     fontFamily: Platform.select({ ios: 'Menlo', android: 'monospace' }),
     fontSize: 9,
-    lineHeight: 13,
-    marginTop: 14,
-    textAlign: 'center',
+    marginLeft: 9,
+    textAlign: 'right',
   },
 });

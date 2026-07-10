@@ -13,6 +13,7 @@
 		761780ED2CA45674006654EE /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = 761780EC2CA45674006654EE /* AppDelegate.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		A17B4E1D2E1D4F8E00991A42 /* thumbnail_source.png in Resources */ = {isa = PBXBuildFile; fileRef = A17B4F1D2E1D4F8E00991A42 /* thumbnail_source.png */; };
+		A17B4E2D2E1D4F8E00991A42 /* unknown_source.rnstunknown in Resources */ = {isa = PBXBuildFile; fileRef = A17B4F2D2E1D4F8E00991A42 /* unknown_source.rnstunknown */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -26,6 +27,7 @@
 		761780EC2CA45674006654EE /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = AppDelegate.swift; path = ReactNativeSystemThumbnailsExample/AppDelegate.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = ReactNativeSystemThumbnailsExample/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		A17B4F1D2E1D4F8E00991A42 /* thumbnail_source.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; name = thumbnail_source.png; path = ReactNativeSystemThumbnailsExample/thumbnail_source.png; sourceTree = "<group>"; };
+		A17B4F2D2E1D4F8E00991A42 /* unknown_source.rnstunknown */ = {isa = PBXFileReference; lastKnownFileType = file; name = unknown_source.rnstunknown; path = ReactNativeSystemThumbnailsExample/unknown_source.rnstunknown; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -46,6 +48,7 @@
 			children = (
 				13B07FB51A68108700A75B9A /* Images.xcassets */,
 				A17B4F1D2E1D4F8E00991A42 /* thumbnail_source.png */,
+				A17B4F2D2E1D4F8E00991A42 /* unknown_source.rnstunknown */,
 				761780EC2CA45674006654EE /* AppDelegate.swift */,
 				13B07FB61A68108700A75B9A /* Info.plist */,
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
@@ -164,6 +167,7 @@
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				A17B4E1D2E1D4F8E00991A42 /* thumbnail_source.png in Resources */,
+				A17B4E2D2E1D4F8E00991A42 /* unknown_source.rnstunknown in Resources */,
 				0D7A6E62F3DABF532F8BC9AE /* PrivacyInfo.xcprivacy in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

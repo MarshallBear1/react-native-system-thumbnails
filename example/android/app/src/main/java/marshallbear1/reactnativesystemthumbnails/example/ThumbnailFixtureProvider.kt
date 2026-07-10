@@ -17,12 +17,49 @@ class ThumbnailFixtureProvider : ContentProvider() {
 
   // The fixture is also a drawable for the source preview; openRawResource
   // intentionally streams its original packaged PNG bytes to ContentResolver.
-  private val fixtureBytes: ByteArray by lazy {
-    readFixtureBytes()
+  private val imageFixture: Fixture by lazy {
+    Fixture(
+      id = IMAGE_FIXTURE_ID,
+      path = IMAGE_FIXTURE_PATH,
+      displayName = IMAGE_DISPLAY_NAME,
+      mimeType = IMAGE_MIME_TYPE,
+      bytes = readImageFixtureBytes()
+    )
+  }
+
+  private val unknownFixture = Fixture(
+    id = UNKNOWN_FIXTURE_ID,
+    path = UNKNOWN_FIXTURE_PATH,
+    displayName = UNKNOWN_DISPLAY_NAME,
+    mimeType = UNKNOWN_MIME_TYPE,
+    bytes = "RNST_UNKNOWN_FIXTURE_V1".toByteArray(Charsets.UTF_8)
+  )
+
+  private data class Fixture(
+    val id: Long,
+    val path: String,
+    val displayName: String,
+    val mimeType: String,
+    val bytes: ByteArray
+  )
+
+  private fun fixtureFor(uri: Uri): Fixture? {
+    if (
+      uri.scheme != "content" ||
+      uri.authority != "${requireNotNull(context).packageName}.fixtures"
+    ) {
+      return null
+    }
+
+    return when (uri.pathSegments.singleOrNull()) {
+      IMAGE_FIXTURE_PATH -> imageFixture
+      UNKNOWN_FIXTURE_PATH -> unknownFixture
+      else -> null
+    }
   }
 
   @SuppressLint("ResourceType")
-  private fun readFixtureBytes(): ByteArray {
+  private fun readImageFixtureBytes(): ByteArray {
     return requireNotNull(context)
       .resources
       .openRawResource(R.drawable.thumbnail_source)
@@ -32,7 +69,7 @@ class ThumbnailFixtureProvider : ContentProvider() {
   override fun onCreate(): Boolean = true
 
   override fun getType(uri: Uri): String? =
-    if (isFixture(uri)) MIME_TYPE else null
+    fixtureFor(uri)?.mimeType
 
   override fun query(
     uri: Uri,
@@ -43,7 +80,8 @@ class ThumbnailFixtureProvider : ContentProvider() {
   ): Cursor {
     val columns = projection?.let { arrayOf(*it) } ?: DEFAULT_PROJECTION
     val cursor = MatrixCursor(columns, 1)
-    if (!isFixture(uri)) {
+    val fixture = fixtureFor(uri)
+    if (fixture == null) {
       return cursor
     }
 
@@ -52,10 +90,10 @@ class ThumbnailFixtureProvider : ContentProvider() {
       row.add(
         column,
         when (column) {
-          BaseColumns._ID -> FIXTURE_ID
-          OpenableColumns.DISPLAY_NAME -> DISPLAY_NAME
-          OpenableColumns.SIZE -> fixtureBytes.size.toLong()
-          MediaStore.MediaColumns.MIME_TYPE -> MIME_TYPE
+          BaseColumns._ID -> fixture.id
+          OpenableColumns.DISPLAY_NAME -> fixture.displayName
+          OpenableColumns.SIZE -> fixture.bytes.size.toLong()
+          MediaStore.MediaColumns.MIME_TYPE -> fixture.mimeType
           LAST_MODIFIED_COLUMN -> LAST_MODIFIED_VALUE
           else -> null
         }
@@ -65,9 +103,8 @@ class ThumbnailFixtureProvider : ContentProvider() {
   }
 
   override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
-    if (!isFixture(uri)) {
-      throw FileNotFoundException("Unknown fixture URI: $uri")
-    }
+    val fixture = fixtureFor(uri)
+      ?: throw FileNotFoundException("Unknown fixture URI: $uri")
     if (mode != "r") {
       throw FileNotFoundException("The thumbnail fixture is read-only.")
     }
@@ -77,7 +114,7 @@ class ThumbnailFixtureProvider : ContentProvider() {
       {
         runCatching {
           ParcelFileDescriptor.AutoCloseOutputStream(pipe[1]).use { output ->
-            output.write(fixtureBytes)
+            output.write(fixture.bytes)
           }
         }
       },
@@ -105,16 +142,15 @@ class ThumbnailFixtureProvider : ContentProvider() {
     selectionArgs: Array<out String>?
   ): Int = throw UnsupportedOperationException("The thumbnail fixture is read-only.")
 
-  private fun isFixture(uri: Uri): Boolean =
-    uri.scheme == "content" &&
-      uri.authority == "${requireNotNull(context).packageName}.fixtures" &&
-      uri.pathSegments == listOf(FIXTURE_PATH)
-
   companion object {
-    private const val FIXTURE_ID = 1L
-    private const val FIXTURE_PATH = "thumbnail-source.png"
-    private const val DISPLAY_NAME = "thumbnail-source.png"
-    private const val MIME_TYPE = "image/png"
+    private const val IMAGE_FIXTURE_ID = 1L
+    private const val IMAGE_FIXTURE_PATH = "thumbnail-source.png"
+    private const val IMAGE_DISPLAY_NAME = "thumbnail-source.png"
+    private const val IMAGE_MIME_TYPE = "image/png"
+    private const val UNKNOWN_FIXTURE_ID = 2L
+    private const val UNKNOWN_FIXTURE_PATH = "unknown-source.rnstunknown"
+    private const val UNKNOWN_DISPLAY_NAME = "unknown-source.rnstunknown"
+    private const val UNKNOWN_MIME_TYPE = "application/x-rnst-unknown"
     private const val LAST_MODIFIED_COLUMN = "last_modified"
     private const val LAST_MODIFIED_VALUE = 1_720_569_600_000L
     private val DEFAULT_PROJECTION = arrayOf(
