@@ -120,13 +120,42 @@ class ThumbnailGeneratorTest {
     assertEquals(ThumbnailErrorCode.CANCELLED, error.code)
   }
 
-  private fun request(uri: String, width: Int, height: Int) = ThumbnailRequest(
+  @Test
+  fun `bridge request rejects dimensions above maximum`() {
+    val error = try {
+      request("file:///tmp/too-large.png", 4097, 32)
+      throw AssertionError("Expected oversized dimensions to fail")
+    } catch (error: ThumbnailNativeException) {
+      error
+    }
+
+    assertEquals(ThumbnailErrorCode.INVALID_ARGUMENT, error.code)
+  }
+
+  @Test
+  fun `bridge request rejects quality outside supported range`() {
+    val error = try {
+      request("file:///tmp/too-lossy.jpg", 32, 32, qualityPercent = 101)
+      throw AssertionError("Expected invalid quality to fail")
+    } catch (error: ThumbnailNativeException) {
+      error
+    }
+
+    assertEquals(ThumbnailErrorCode.INVALID_ARGUMENT, error.code)
+  }
+
+  private fun request(
+    uri: String,
+    width: Int,
+    height: Int,
+    qualityPercent: Int = 90
+  ) = ThumbnailRequest.fromBridge(
     requestId = "image-1",
     uri = uri,
-    width = width,
-    height = height,
-    format = ThumbnailFormat.PNG,
-    qualityPercent = 90,
+    width = width.toDouble(),
+    height = height.toDouble(),
+    format = "png",
+    quality = qualityPercent.toDouble() / 100.0,
     useCache = true,
     allowIconFallback = true
   )
