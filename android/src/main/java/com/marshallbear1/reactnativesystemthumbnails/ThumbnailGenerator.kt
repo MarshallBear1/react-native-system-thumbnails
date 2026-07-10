@@ -174,17 +174,19 @@ internal data class ThumbnailRequest(
         )
       }
       if (!width.isFinite() || width < 1.0 || width % 1.0 != 0.0 ||
-        !height.isFinite() || height < 1.0 || height % 1.0 != 0.0
+        width > MAX_DIMENSION.toDouble() ||
+        !height.isFinite() || height < 1.0 || height % 1.0 != 0.0 ||
+        height > MAX_DIMENSION.toDouble()
       ) {
         throw ThumbnailNativeException(
           ThumbnailErrorCode.INVALID_ARGUMENT,
-          "width and height must be positive whole numbers."
+          "width and height must be whole numbers from 1 to $MAX_DIMENSION."
         )
       }
-      if (!quality.isFinite()) {
+      if (!quality.isFinite() || quality < 0.0 || quality > 1.0) {
         throw ThumbnailNativeException(
           ThumbnailErrorCode.INVALID_ARGUMENT,
-          "quality must be a finite number."
+          "quality must be a finite number from 0 through 1."
         )
       }
 
@@ -200,10 +202,10 @@ internal data class ThumbnailRequest(
       return ThumbnailRequest(
         requestId = requestId,
         uri = uri.trim(),
-        width = width.coerceAtMost(MAX_DIMENSION.toDouble()).toInt(),
-        height = height.coerceAtMost(MAX_DIMENSION.toDouble()).toInt(),
+        width = width.toInt(),
+        height = height.toInt(),
         format = nativeFormat,
-        qualityPercent = (quality.coerceIn(0.0, 1.0) * 100.0).roundToInt(),
+        qualityPercent = (quality * 100.0).roundToInt(),
         useCache = useCache,
         allowIconFallback = allowIconFallback
       )
